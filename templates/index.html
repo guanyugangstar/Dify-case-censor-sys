@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>文件/合同审查系统</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 40px; }
+        .container { max-width: 500px; margin: auto; }
+        .form-group { margin-bottom: 16px; }
+        label { display: block; margin-bottom: 6px; }
+        input[type="file"] { margin-top: 6px; }
+        .result { margin-top: 24px; padding: 12px; border: 1px solid #ccc; background: #f9f9f9; }
+        .error { color: red; margin-bottom: 12px; }
+        #stream_result { white-space: pre-wrap; min-height: 80px; }
+    </style>
+    <script>
+        function toggleContractingParty() {
+            var type = document.querySelector('input[name="review_type"]:checked').value;
+            document.getElementById('contracting_party_group').style.display = (type === '合同审查') ? 'block' : 'none';
+        }
+        window.onload = function() {
+            toggleContractingParty();
+        };
+
+        function showError(msg) {
+            document.getElementById('error_box').innerText = msg;
+        }
+        function clearError() {
+            document.getElementById('error_box').innerText = '';
+        }
+        function clearResult() {
+            document.getElementById('stream_result').innerText = '';
+        }
+        // 递归渲染JSON为HTML，所有字符串字段直接以中文直出
+        function renderJsonToHtml(obj, indent = 0) {
+            let html = '';
+            const pad = '&nbsp;'.repeat(indent * 2);
+            if (Array.isArray(obj)) {
+                html += '[<br>';
+                for (let i = 0; i < obj.length; i++) {
+                    html += pad + renderJsonToHtml(obj[i], indent + 1) + (i < obj.length - 1 ? ',' : '') + '<br>';
+                }
+                html += pad.slice(0, -2) + ']';
+            } else if (typeof obj === 'object' && obj !== null) {
+                html += '{<br>';
+                const keys = Object.keys(obj);
+                keys.forEach((key, idx) => {
+                    html += pad + '&nbsp;&nbsp;"' + key + '": ' + renderJsonToHtml(obj[key], indent + 1);
+                    if (idx < keys.length - 1) html += ',';
+                    html += '<br>';
+                });
+                html += pad + '}';
+            } else if (typeof obj === 'string') {
+                html += '"' + obj.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '"';
+            } else {
+                html += String(obj);
+            }
+            return html;
+        }
+        async function handleFormSubmit(e) {
+            e.preventDefault();
+            clearError();
+            clearResult();
+            const form = e.target;
+            const formData = new FormData(form);
+            try {
+                // 1. 先POST /upload，获取inputs和user_id
+                const resp = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (!resp.ok) {
+                    showError('文件上传失败');
+                    return;
+                }
+                const data = await resp.json();
+                if (!data.inputs || !data.user_id) {
+                    showError('参数返回异常');
+                    return;
+                }
+                // 调试：直接输出filename
+                if (data.inputs.file && data.inputs.file.filename) {
+                    console.log('前端拿到的filename:', data.inputs.file.filename);
+                }
+                // 2. POST /stream_chat，流式获取AI输出
+                const resultBox = document.getElementById('stream_result');
+                resultBox.innerHTML = '';
+                const streamResp = await fetch('/stream_chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ inputs: data.inputs, user_id: data.user_id })
+                });
+                if (!streamResp.ok) {
+                    showError('AI审查流式接口调用失败');
+                    return;
+                }
+                const reader = streamResp.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let buffer = '';
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    // 处理SSE格式：data: ...\n\n
+                    let lines = buffer.split(/\n\n/);
+                    buffer = lines.pop(); // 最后一段可能不完整
+                    for (let line of lines) {
+                        if (line.startsWith('data:')) {
+                            let content = line.slice(5).trim();
+                            if (content.startsWith('[ERROR]')) {
+                                showError(content);
+                            } else {
+                                try {
+                                    let obj = JSON.parse(content);
+                                    // 只处理event为node_finished的片段
+                                    if (obj.event === 'node_finished' && obj.data && obj.data.title && (obj.data.title === '直接回复 2' || obj.data.title === '直接回复2' || obj.data.title === '直接回复 3' || obj.data.title === '直接回复3')) {
+                                        if (obj.data.outputs && obj.data.outputs.answer) {
+                                            resultBox.innerHTML += obj.data.outputs.answer + '<br><hr><br>';
+                                        }
+                                    }
+                                } catch (e) {
+                                    // 忽略解析失败的片段
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                showError('系统异常: ' + err);
+            }
+        }
+    </script>
+</head>
+<body>
+<div class="container">
+    <h2>文件/合同审查系统</h2>
+    <div id="error_box" class="error"></div>
+    <form id="review_form" method="post" action="/upload" enctype="multipart/form-data" onsubmit="handleFormSubmit(event)">
+        <div class="form-group">
+            <label>类型选择：</label>
+            <label><input type="radio" name="review_type" value="文件审查" checked onclick="toggleContractingParty()"> 文件审查</label>
+            <label><input type="radio" name="review_type" value="合同审查" onclick="toggleContractingParty()"> 合同审查</label>
+        </div>
+        <div class="form-group" id="contracting_party_group" style="display:none;">
+            <label>合同身份：</label>
+            <label><input type="radio" name="contracting_party" value="甲方"> 甲方</label>
+            <label><input type="radio" name="contracting_party" value="乙方"> 乙方</label>
+            <label><input type="radio" name="contracting_party" value="丙方"> 丙方</label>
+        </div>
+        <div class="form-group">
+            <label>上传文件：</label>
+            <input type="file" name="file" required>
+        </div>
+        <button type="submit">提交审核</button>
+    </form>
+    <div class="result">
+        <h4>审核结果：</h4>
+        <div id="stream_result"></div>
+    </div>
+</div>
+</body>
+</html> 
