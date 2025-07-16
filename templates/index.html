@@ -105,6 +105,8 @@
             }
         }
     </style>
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js" onerror="var s=document.createElement('script');s.src='/static/marked.min.js';document.head.appendChild(s);"></script>
     <script>
         function toggleContractingParty() {
             var type = document.querySelector('input[name="review_type"]:checked').value;
@@ -157,22 +159,32 @@
             return div.innerText || div.textContent || '';
         }
         // 新增：渲染带截断的内容
-        function renderTruncatedContent(elementId, htmlContent, storageKey) {
-            const text = htmlToText(htmlContent);
-            let truncated = htmlContent;
-            if (text.length > 50) {
-                // 简单截断：取前50字的纯文本，后面加“……”
-                // 但保持HTML渲染，直接用纯文本截断会破坏标签，这里用纯文本+span包裹“……”
-                // 方案：只显示前50字纯文本，后面加span，点击弹窗看完整内容
-                let shortText = text.slice(0, 50) + '……';
-                truncated = shortText;
+        function renderTruncatedContent(elementId, markdownContent, storageKey) {
+            if (typeof marked === 'undefined') {
+                // 降级为纯文本
+                const text = htmlToText(markdownContent);
+                let truncated = text;
+                if (text.length > 50) {
+                    truncated = text.slice(0, 50) + '……';
+                }
+                document.getElementById(elementId).innerText = truncated;
+                window[storageKey] = markdownContent;
+                return;
             }
-            document.getElementById(elementId).innerHTML = truncated;
-            // 保存完整内容到window作用域，便于弹窗
-            window[storageKey] = htmlContent;
+            // 先将Markdown转为HTML，再转为纯文本判断长度
+            const html = marked.parse(markdownContent);
+            const text = htmlToText(html);
+            let truncatedHtml = html;
+            if (text.length > 50) {
+                // 截断纯文本后再用marked渲染
+                const shortText = text.slice(0, 50) + '……';
+                truncatedHtml = marked.parse(shortText);
+            }
+            document.getElementById(elementId).innerHTML = truncatedHtml;
+            window[storageKey] = markdownContent;
         }
         // 新增：弹窗显示完整内容
-        function showFullContent(htmlContent) {
+        function showFullContent(markdownContent) {
             let modal = document.getElementById('result_modal');
             if (!modal) {
                 modal = document.createElement('div');
@@ -195,7 +207,11 @@
                 `;
                 document.body.appendChild(modal);
             }
-            document.getElementById('modal_content').innerHTML = htmlContent;
+            if (typeof marked === 'undefined') {
+                document.getElementById('modal_content').innerText = markdownContent;
+            } else {
+                document.getElementById('modal_content').innerHTML = marked.parse(markdownContent);
+            }
             modal.style.display = 'flex';
             document.getElementById('modal_close').onclick = function() {
                 modal.style.display = 'none';

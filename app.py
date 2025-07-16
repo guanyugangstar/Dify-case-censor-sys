@@ -136,8 +136,6 @@ def upload():
             resp = requests.post(url, headers=headers, files=files, data=data)
             resp.raise_for_status()
             file_info = resp.json()
-            print('file_info filename:', file_info.get('filename'))
-            print('file_info filename repr:', repr(file_info.get('filename')))
             file_info = decode_unicode_dict(file_info)  # 新增：递归反转义
             file_id = file_info['id']
     except Exception as e:
@@ -153,7 +151,6 @@ def upload():
     if file_dict['type'] not in ['document', 'image', 'audio', 'video']:
         flash('文件类型不被支持，请上传文档、图片、音频或视频类型文件')
         return redirect(url_for('index'))
-    print('file_dict for chatflow:', file_dict, flush=True)
     inputs = {
         'file': file_dict,
         'Category': category
