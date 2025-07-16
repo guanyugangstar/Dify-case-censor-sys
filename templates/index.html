@@ -89,6 +89,10 @@
             flex: 1;
             word-break: break-all;
             white-space: pre-wrap;
+            max-height: 80px;
+            overflow: hidden;
+            position: relative;
+            cursor: pointer;
         }
         @media (max-width: 700px) {
             .container {
@@ -145,6 +149,66 @@
                 html += String(obj);
             }
             return html;
+        }
+        // 新增：HTML转纯文本工具
+        function htmlToText(html) {
+            var div = document.createElement('div');
+            div.innerHTML = html;
+            return div.innerText || div.textContent || '';
+        }
+        // 新增：渲染带截断的内容
+        function renderTruncatedContent(elementId, htmlContent, storageKey) {
+            const text = htmlToText(htmlContent);
+            let truncated = htmlContent;
+            if (text.length > 50) {
+                // 简单截断：取前50字的纯文本，后面加“……”
+                // 但保持HTML渲染，直接用纯文本截断会破坏标签，这里用纯文本+span包裹“……”
+                // 方案：只显示前50字纯文本，后面加span，点击弹窗看完整内容
+                let shortText = text.slice(0, 50) + '……';
+                truncated = shortText;
+            }
+            document.getElementById(elementId).innerHTML = truncated;
+            // 保存完整内容到window作用域，便于弹窗
+            window[storageKey] = htmlContent;
+        }
+        // 新增：弹窗显示完整内容
+        function showFullContent(htmlContent) {
+            let modal = document.getElementById('result_modal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'result_modal';
+                modal.style.position = 'fixed';
+                modal.style.left = '0';
+                modal.style.top = '0';
+                modal.style.width = '100vw';
+                modal.style.height = '100vh';
+                modal.style.background = 'rgba(0,0,0,0.25)';
+                modal.style.display = 'flex';
+                modal.style.alignItems = 'center';
+                modal.style.justifyContent = 'center';
+                modal.style.zIndex = '9999';
+                modal.innerHTML = `
+                  <div id="modal_card" style="background:#fff;max-width:520px;width:90vw;max-height:80vh;overflow:auto;border-radius:14px;box-shadow:0 4px 24px 0 rgba(0,0,0,0.12);padding:32px 28px 24px 28px;position:relative;">
+                    <button id="modal_close" style="position:absolute;top:12px;right:12px;background:none;border:none;font-size:22px;cursor:pointer;">×</button>
+                    <div id="modal_content"></div>
+                  </div>
+                `;
+                document.body.appendChild(modal);
+            }
+            document.getElementById('modal_content').innerHTML = htmlContent;
+            modal.style.display = 'flex';
+            document.getElementById('modal_close').onclick = function() {
+                modal.style.display = 'none';
+            };
+        }
+        // 绑定点击事件
+        function bindResultClick() {
+            document.getElementById('primary_result').onclick = function() {
+                if (window.primary_full_content) showFullContent(window.primary_full_content);
+            };
+            document.getElementById('review_result').onclick = function() {
+                if (window.review_full_content) showFullContent(window.review_full_content);
+            };
         }
         async function handleFormSubmit(e) {
             e.preventDefault();
@@ -207,13 +271,15 @@
                                     // 只处理event为node_finished的片段
                                     if (obj.event === 'node_finished' && obj.data && obj.data.title && (obj.data.title === '直接回复 2' || obj.data.title === '直接回复2')) {
                                         if (obj.data.outputs && obj.data.outputs.answer) {
-                                            document.getElementById('primary_result').innerHTML = obj.data.outputs.answer;
+                                            renderTruncatedContent('primary_result', obj.data.outputs.answer, 'primary_full_content');
                                             document.getElementById('review_result').innerHTML = '审核中……';
+                                            bindResultClick();
                                             primaryDone = true;
                                         }
                                     } else if (obj.event === 'node_finished' && obj.data && obj.data.title && (obj.data.title === '直接回复 3' || obj.data.title === '直接回复3')) {
                                         if (obj.data.outputs && obj.data.outputs.answer) {
-                                            document.getElementById('review_result').innerHTML = obj.data.outputs.answer;
+                                            renderTruncatedContent('review_result', obj.data.outputs.answer, 'review_full_content');
+                                            bindResultClick();
                                         }
                                     }
                                 } catch (e) {
