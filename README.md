@@ -8,7 +8,10 @@
 - 合同审查时支持甲方/乙方身份输入
 - 一次表单提交，后端自动串联Dify文件上传与工作流调用
 - 审核结果本地展示，无需持久化
-- 原生风格UI，简洁易用
+- 现代简约大方UI，苹果风格美化，响应式布局
+- 初审/复审结果分离独立展示，交互体验优化
+- 审核进度实时反馈（“审核中……”提示）
+- 支持GitHub版本管理与回滚
 
 ## 目录结构
 ```
@@ -51,6 +54,31 @@ censor_system/
 - Dify API Token请妥善保管，避免泄露。
 - 文件上传大小、类型受Dify官方API限制。
 - 本系统仅作演示用途，未做持久化与安全加固。
+
+## 特色亮点
+- 现代简约风格UI，圆角卡片、阴影、舒适配色，兼容移动端
+- 初审结果与复审结果分为独立卡片，交互清晰
+- 审核进度实时反馈，用户体验友好
+- 支持GitHub远程仓库，便于团队协作与历史回滚
+
+## GitHub远程部署与回滚
+1. 初始化本地git仓库
+   ```bash
+   git init
+   git add .
+   git commit -m "init project"
+   ```
+2. 关联远程仓库并推送
+   ```bash
+   git remote add origin https://github.com/你的用户名/censor_system.git
+   git branch -M main
+   git push -u origin main
+   ```
+3. 回滚到历史版本
+   ```bash
+   git log   # 查看历史commit
+   git checkout <commit_id>
+   ```
 
 ## 联系与反馈
 如有问题或建议，请联系开发者。 

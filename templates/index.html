@@ -4,14 +4,102 @@
     <meta charset="UTF-8">
     <title>文件/合同审查系统</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 40px; }
-        .container { max-width: 500px; margin: auto; }
-        .form-group { margin-bottom: 16px; }
-        label { display: block; margin-bottom: 6px; }
-        input[type="file"] { margin-top: 6px; }
-        .result { margin-top: 24px; padding: 12px; border: 1px solid #ccc; background: #f9f9f9; }
-        .error { color: red; margin-bottom: 12px; }
-        #stream_result { white-space: pre-wrap; min-height: 80px; }
+        body {
+            font-family: 'SF Pro Display', 'Helvetica Neue', Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: #f5f5f7;
+            margin: 0;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 480px;
+            margin: 48px auto 0 auto;
+            background: #fff;
+            border-radius: 18px;
+            box-shadow: 0 4px 24px 0 rgba(0,0,0,0.08);
+            padding: 36px 32px 32px 32px;
+        }
+        h2 {
+            text-align: center;
+            font-weight: 700;
+            letter-spacing: 1px;
+            margin-bottom: 32px;
+        }
+        .form-group {
+            margin-bottom: 22px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 15px;
+        }
+        input[type="file"] {
+            margin-top: 8px;
+        }
+        input[type="radio"] {
+            accent-color: #007aff;
+            margin-right: 6px;
+        }
+        button[type="submit"] {
+            width: 100%;
+            background: #007aff;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 0;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 2px 8px 0 rgba(0,0,0,0.04);
+            transition: background 0.2s;
+        }
+        button[type="submit"]:hover {
+            background: #005ecb;
+        }
+        .error {
+            color: #d93025;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+        .results-flex {
+            display: flex;
+            gap: 24px;
+            margin-top: 32px;
+            flex-wrap: wrap;
+        }
+        .result-card {
+            flex: 1 1 200px;
+            background: #fafbfc;
+            border-radius: 14px;
+            box-shadow: 0 2px 8px 0 rgba(0,0,0,0.04);
+            padding: 20px 18px 18px 18px;
+            min-width: 200px;
+            min-height: 120px;
+            display: flex;
+            flex-direction: column;
+        }
+        .result-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #222;
+        }
+        .result-content {
+            font-size: 15px;
+            color: #333;
+            flex: 1;
+            word-break: break-all;
+            white-space: pre-wrap;
+        }
+        @media (max-width: 700px) {
+            .container {
+                max-width: 98vw;
+                padding: 18px 4vw 18px 4vw;
+            }
+            .results-flex {
+                flex-direction: column;
+                gap: 16px;
+            }
+        }
     </style>
     <script>
         function toggleContractingParty() {
@@ -29,7 +117,8 @@
             document.getElementById('error_box').innerText = '';
         }
         function clearResult() {
-            document.getElementById('stream_result').innerText = '';
+            document.getElementById('primary_result').innerText = '';
+            document.getElementById('review_result').innerText = '';
         }
         // 递归渲染JSON为HTML，所有字符串字段直接以中文直出
         function renderJsonToHtml(obj, indent = 0) {
@@ -61,6 +150,9 @@
             e.preventDefault();
             clearError();
             clearResult();
+            // 优化：提交后初审显示“审核中……”，复审清空
+            document.getElementById('primary_result').innerText = '审核中……';
+            document.getElementById('review_result').innerText = '';
             const form = e.target;
             const formData = new FormData(form);
             try {
@@ -83,8 +175,7 @@
                     console.log('前端拿到的filename:', data.inputs.file.filename);
                 }
                 // 2. POST /stream_chat，流式获取AI输出
-                const resultBox = document.getElementById('stream_result');
-                resultBox.innerHTML = '';
+                // 初审“审核中……”，复审清空（已在上方设置，无需重复）
                 const streamResp = await fetch('/stream_chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -97,6 +188,7 @@
                 const reader = streamResp.body.getReader();
                 const decoder = new TextDecoder('utf-8');
                 let buffer = '';
+                let primaryDone = false;
                 while (true) {
                     const { value, done } = await reader.read();
                     if (done) break;
@@ -113,9 +205,15 @@
                                 try {
                                     let obj = JSON.parse(content);
                                     // 只处理event为node_finished的片段
-                                    if (obj.event === 'node_finished' && obj.data && obj.data.title && (obj.data.title === '直接回复 2' || obj.data.title === '直接回复2' || obj.data.title === '直接回复 3' || obj.data.title === '直接回复3')) {
+                                    if (obj.event === 'node_finished' && obj.data && obj.data.title && (obj.data.title === '直接回复 2' || obj.data.title === '直接回复2')) {
                                         if (obj.data.outputs && obj.data.outputs.answer) {
-                                            resultBox.innerHTML += obj.data.outputs.answer + '<br><hr><br>';
+                                            document.getElementById('primary_result').innerHTML = obj.data.outputs.answer;
+                                            document.getElementById('review_result').innerHTML = '审核中……';
+                                            primaryDone = true;
+                                        }
+                                    } else if (obj.event === 'node_finished' && obj.data && obj.data.title && (obj.data.title === '直接回复 3' || obj.data.title === '直接回复3')) {
+                                        if (obj.data.outputs && obj.data.outputs.answer) {
+                                            document.getElementById('review_result').innerHTML = obj.data.outputs.answer;
                                         }
                                     }
                                 } catch (e) {
@@ -153,9 +251,15 @@
         </div>
         <button type="submit">提交审核</button>
     </form>
-    <div class="result">
-        <h4>审核结果：</h4>
-        <div id="stream_result"></div>
+    <div class="results-flex">
+        <div class="result-card">
+            <div class="result-title">初审结果：</div>
+            <div id="primary_result" class="result-content"></div>
+        </div>
+        <div class="result-card">
+            <div class="result-title">复审结果：</div>
+            <div id="review_result" class="result-content"></div>
+        </div>
     </div>
 </div>
 </body>
