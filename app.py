@@ -197,4 +197,4 @@ def stream_chat():
     return Response(stream_with_context(event_stream()), mimetype='text/event-stream')
 
 if __name__ == '__main__':
-    app.run(debug=True) 
+    app.run(debug=False, port=5050) 

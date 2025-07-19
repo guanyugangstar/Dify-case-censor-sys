@@ -93,6 +93,7 @@
             overflow: hidden;
             position: relative;
             cursor: pointer;
+            overflow-y: auto;
         }
         @media (max-width: 700px) {
             .container {
@@ -235,6 +236,13 @@
             document.getElementById('review_result').innerText = '';
             const form = e.target;
             const formData = new FormData(form);
+
+            // 新增：用于流式内容追加
+            let primaryStreaming = true;
+            let reviewStreaming = false;
+            let primaryBuffer = '';
+            let reviewBuffer = '';
+
             try {
                 // 1. 先POST /upload，获取inputs和user_id
                 const resp = await fetch('/upload', {
@@ -269,13 +277,16 @@
                 const decoder = new TextDecoder('utf-8');
                 let buffer = '';
                 let primaryDone = false;
+                let reviewDone = false;
+                // 新增：清空内容
+                document.getElementById('primary_result').innerText = '审核中……';
+                document.getElementById('review_result').innerText = '';
                 while (true) {
                     const { value, done } = await reader.read();
                     if (done) break;
                     buffer += decoder.decode(value, { stream: true });
-                    // 处理SSE格式：data: ...\n\n
                     let lines = buffer.split(/\n\n/);
-                    buffer = lines.pop(); // 最后一段可能不完整
+                    buffer = lines.pop();
                     for (let line of lines) {
                         if (line.startsWith('data:')) {
                             let content = line.slice(5).trim();
@@ -287,15 +298,44 @@
                                     // 只处理event为node_finished的片段
                                     if (obj.event === 'node_finished' && obj.data && obj.data.title && (obj.data.title === '直接回复 2' || obj.data.title === '直接回复2')) {
                                         if (obj.data.outputs && obj.data.outputs.answer) {
+                                            // 只显示最终answer，清空前面内容
                                             renderTruncatedContent('primary_result', obj.data.outputs.answer, 'primary_full_content');
-                                            document.getElementById('review_result').innerHTML = '审核中……';
+                                            document.getElementById('review_result').innerText = '审核中……';
                                             bindResultClick();
                                             primaryDone = true;
+                                            primaryStreaming = false;
+                                            reviewStreaming = true;
+                                            // 清空reviewBuffer
+                                            reviewBuffer = '';
                                         }
                                     } else if (obj.event === 'node_finished' && obj.data && obj.data.title && (obj.data.title === '直接回复 3' || obj.data.title === '直接回复3')) {
                                         if (obj.data.outputs && obj.data.outputs.answer) {
+                                            // 只显示最终answer，清空前面内容
                                             renderTruncatedContent('review_result', obj.data.outputs.answer, 'review_full_content');
                                             bindResultClick();
+                                            reviewDone = true;
+                                            reviewStreaming = false;
+                                        }
+                                    } else {
+                                        // 新增：流式内容追加显示
+                                        if (primaryStreaming && !primaryDone) {
+                                            // 只在初审阶段追加
+                                            if (content) {
+                                                primaryBuffer += (htmlToText(content) + '\n');
+                                                document.getElementById('primary_result').innerText = primaryBuffer;
+                                                // 自动滚动到底部
+                                                let el = document.getElementById('primary_result');
+                                                el.scrollTop = el.scrollHeight;
+                                            }
+                                        } else if (reviewStreaming && !reviewDone) {
+                                            // 只在复审阶段追加
+                                            if (content) {
+                                                reviewBuffer += (htmlToText(content) + '\n');
+                                                document.getElementById('review_result').innerText = reviewBuffer;
+                                                // 自动滚动到底部
+                                                let el = document.getElementById('review_result');
+                                                el.scrollTop = el.scrollHeight;
+                                            }
                                         }
                                     }
                                 } catch (e) {
