@@ -3,13 +3,35 @@ import os
 import enum
 import requests
 import json
+import secrets
+from werkzeug.utils import secure_filename
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
 
 app = Flask(__name__)
-app.secret_key = 'app-np0W2uc7cipLyCoxkM3BF8i2'  # 用于flash消息
 
-# Dify API配置（建议用环境变量管理）
-DIFY_API_BASE_URL = 'http://localhost/v1'
-DIFY_API_TOKEN = os.environ.get('DIFY_API_TOKEN', 'app-np0W2uc7cipLyCoxkM3BF8i2')
+# 安全配置 - 使用环境变量或随机生成
+app.secret_key = os.environ.get('SECRET_KEY', secrets.token_hex(32))
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB文件大小限制
+
+# Dify API配置 - 必须通过环境变量设置
+DIFY_API_BASE_URL = os.environ.get('DIFY_API_BASE_URL', 'http://localhost/v1')
+DIFY_API_TOKEN = os.environ.get('DIFY_API_TOKEN')
+
+# 检查必要的环境变量
+if not DIFY_API_TOKEN:
+    raise ValueError("DIFY_API_TOKEN环境变量未设置，请设置后重新启动应用")
+
+# 允许的文件扩展名
+ALLOWED_EXTENSIONS = {
+    'pdf', 'doc', 'docx', 'txt', 'md', 'markdown', 'html',
+    'xls', 'xlsx', 'ppt', 'pptx', 'xml', 'epub', 'csv',
+    'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg',
+    'mp3', 'm4a', 'wav', 'webm', 'amr', 'mpga',
+    'mp4', 'mov', 'mpeg'
+}
 
 # 文件类型映射
 EXT_TYPE_MAP = {
@@ -48,7 +70,38 @@ EXT_FILETYPE_MAP = {
     'mp3': 'audio', 'm4a': 'audio', 'wav': 'audio', 'webm': 'audio', 'amr': 'audio', 'mpga': 'audio',
     'mp4': 'video', 'mov': 'video', 'mpeg': 'video',
 }
+def allowed_file(filename):
+    """检查文件扩展名是否被允许"""
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def validate_file(file):
+    """全面的文件验证"""
+    if not file:
+        return False, "未选择文件"
+    
+    if file.filename == '':
+        return False, "文件名不能为空"
+    
+    if not allowed_file(file.filename):
+        return False, f"不支持的文件类型。支持的格式：{', '.join(sorted(ALLOWED_EXTENSIONS))}"
+    
+    # 检查文件大小（通过读取内容长度）
+    file.seek(0, 2)  # 移动到文件末尾
+    file_size = file.tell()
+    file.seek(0)  # 重置到文件开头
+    
+    max_size = app.config['MAX_CONTENT_LENGTH']
+    if file_size > max_size:
+        return False, f"文件过大，最大支持 {max_size // (1024*1024)}MB"
+    
+    if file_size == 0:
+        return False, "文件不能为空"
+    
+    return True, "文件验证通过"
+
 def guess_type(file):
+    """推测文件类型"""
     mime = getattr(file, 'mimetype', None)
     ext = EXT_TYPE_MAP.get(mime)
     if not ext:
@@ -105,9 +158,18 @@ def upload():
     contracting_party = request.form.get('contracting_party')
     file = request.files.get('file')
 
-    if not review_type or not file:
-        flash('类型和文件为必填项')
+    # 基本参数验证
+    if not review_type:
+        flash('请选择审查类型')
         return redirect(url_for('index'))
+    
+    # 文件验证
+    is_valid, message = validate_file(file)
+    if not is_valid:
+        flash(message)
+        return redirect(url_for('index'))
+    
+    # 合同审查特殊验证
     if review_type == '合同审查':
         if not contracting_party:
             flash('合同审查时需选择甲方、乙方或丙方')
@@ -115,6 +177,8 @@ def upload():
         if contracting_party not in [e.value for e in ContractingPartyEnum]:
             flash('合同方类型不合法')
             return redirect(url_for('index'))
+    
+    # 审查类型验证
     category = '政策' if review_type == '文件审查' else '合同'
     if category not in [e.value for e in CategoryEnum]:
         flash('审查类型不合法')
@@ -122,8 +186,14 @@ def upload():
 
     user_id = 'demo_user'
 
-    # 保存上传文件到临时路径
-    temp_path = os.path.join('static', file.filename)
+    # 使用安全的文件名并保存到临时路径
+    secure_name = secure_filename(file.filename)
+    if not secure_name:
+        secure_name = f"upload_{secrets.token_hex(8)}.tmp"
+    
+    # 确保static目录存在
+    os.makedirs('static', exist_ok=True)
+    temp_path = os.path.join('static', secure_name)
     file.save(temp_path)
 
     # 用requests上传文件
@@ -186,7 +256,7 @@ def stream_chat():
                 "response_mode": "streaming",
                 "conversation_id": ""
             }
-            with requests.post(url, headers=headers, json=payload, stream=True, timeout=120) as resp:
+            with requests.post(url, headers=headers, json=payload, stream=True, timeout=300) as resp:
                 for line in resp.iter_lines():
                     if line:
                         if line.startswith(b'data:'):
@@ -196,5 +266,25 @@ def stream_chat():
             yield f"data: [ERROR] {str(e)}\n\n"
     return Response(stream_with_context(event_stream()), mimetype='text/event-stream')
 
+# 全局错误处理器
+@app.errorhandler(413)
+def too_large(e):
+    """处理文件过大错误"""
+    flash(f'文件过大，请上传小于 {app.config["MAX_CONTENT_LENGTH"] // (1024*1024)}MB 的文件')
+    return redirect(url_for('index'))
+
+@app.errorhandler(400)
+def bad_request(e):
+    """处理请求错误"""
+    flash('请求格式错误，请检查上传的文件和参数')
+    return redirect(url_for('index'))
+
+@app.errorhandler(500)
+def internal_error(error):
+    """处理服务器内部错误"""
+    app.logger.error(f'Server Error: {error}')
+    flash('服务器内部错误，请稍后重试')
+    return redirect(url_for('index'))
+
 if __name__ == '__main__':
-    app.run(debug=False, port=5050) 
+    app.run(debug=False, port=5050)
