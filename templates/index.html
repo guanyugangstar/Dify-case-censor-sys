@@ -940,7 +940,7 @@
             };
         }
         // 下载Word文档函数
-        function downloadWordDocument(resultType, resultData) {
+        async function downloadWordDocument(resultType, resultData) {
             const downloadBtn = document.getElementById('download_word_btn');
             const originalText = downloadBtn.textContent;
             
@@ -956,37 +956,58 @@
                 filename: `${resultType === 'primary' ? '初审结果' : '复审结果'}_${new Date().toISOString().slice(0, 10)}.docx`
             };
             
-            fetch('/download_word', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify(requestData)
-            })
-            .then(response => {
+            try {
+                const response = await fetch('/download_word', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestData)
+                });
+                
                 if (!response.ok) {
                     throw new Error('下载失败');
                 }
-                return response.blob();
-            })
-            .then(blob => {
-                // 创建下载链接
-                const url = window.URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.style.display = 'none';
-                a.href = url;
-                a.download = requestData.filename;
-                document.body.appendChild(a);
-                a.click();
-                window.URL.revokeObjectURL(url);
-                document.body.removeChild(a);
+                
+                const blob = await response.blob();
+                
+                // 尝试使用现代文件保存API
+                if ('showSaveFilePicker' in window) {
+                    try {
+                        const fileHandle = await window.showSaveFilePicker({
+                            suggestedName: requestData.filename,
+                            types: [{
+                                description: 'Word文档',
+                                accept: {
+                                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx']
+                                }
+                            }]
+                        });
+                        
+                        const writable = await fileHandle.createWritable();
+                        await writable.write(blob);
+                        await writable.close();
+                        
+                        console.log('文件已保存到用户选择的位置');
+                    } catch (saveError) {
+                        if (saveError.name !== 'AbortError') {
+                            console.error('保存文件时出错:', saveError);
+                            // 降级到传统下载方式
+                            fallbackDownload(blob, requestData.filename);
+                        }
+                        // 如果用户取消了保存，不显示错误
+                    }
+                } else {
+                    // 降级方案：传统下载方式
+                    fallbackDownload(blob, requestData.filename);
+                }
                 
                 // 恢复按钮状态
                 downloadBtn.textContent = originalText;
                 downloadBtn.disabled = false;
                 downloadBtn.style.background = '#28a745';
-            })
-            .catch(error => {
+                
+            } catch (error) {
                 console.error('下载错误:', error);
                 alert('下载失败，请重试');
                 
@@ -994,7 +1015,20 @@
                 downloadBtn.textContent = originalText;
                 downloadBtn.disabled = false;
                 downloadBtn.style.background = '#28a745';
-            });
+            }
+        }
+        
+        // 降级下载函数
+        function fallbackDownload(blob, filename) {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.style.display = 'none';
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
         }
 
         // 绑定点击事件
