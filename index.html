@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>文件/合同审查系统</title>
+    <style>
+        body {
+            font-family: 'SF Pro Display', 'Helvetica Neue', Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            background: #f5f5f7;
+            margin: 0;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 480px;
+            margin: 48px auto 0 auto;
+            background: #fff;
+            border-radius: 18px;
+            box-shadow: 0 4px 24px 0 rgba(0,0,0,0.08);
+            padding: 36px 32px 32px 32px;
+        }
+        h2 {
+            text-align: center;
+            font-weight: 700;
+            letter-spacing: 1px;
+            margin-bottom: 32px;
+        }
+        .form-group {
+            margin-bottom: 22px;
+        }
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 15px;
+        }
+        input[type="file"] {
+            margin-top: 8px;
+        }
+        input[type="radio"] {
+            accent-color: #007aff;
+            margin-right: 6px;
+        }
+        button[type="submit"] {
+            width: 100%;
+            background: #007aff;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 0;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            box-shadow: 0 2px 8px 0 rgba(0,0,0,0.04);
+            transition: background 0.2s;
+        }
+        button[type="submit"]:hover {
+            background: #005ecb;
+        }
+        .error {
+            color: #d93025;
+            margin-bottom: 16px;
+            text-align: center;
+        }
+        .results-flex {
+            display: flex;
+            gap: 24px;
+            margin-top: 32px;
+            flex-wrap: wrap;
+        }
+        .result-card {
+            flex: 1 1 200px;
+            background: #fafbfc;
+            border-radius: 14px;
+            box-shadow: 0 2px 8px 0 rgba(0,0,0,0.04);
+            padding: 20px 18px 18px 18px;
+            min-width: 200px;
+            min-height: 120px;
+            display: flex;
+            flex-direction: column;
+        }
+        .result-title {
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            color: #222;
+        }
+        .result-content {
+            font-size: 15px;
+            color: #333;
+            flex: 1;
+            word-break: break-all;
+            white-space: pre-wrap;
+            max-height: 80px;
+            overflow: hidden;
+            position: relative;
+            cursor: pointer;
+            overflow-y: auto;
+        }
+        @media (max-width: 700px) {
+            .container {
+                max-width: 98vw;
+                padding: 18px 4vw 18px 4vw;
+            }
+            .results-flex {
+                flex-direction: column;
+                gap: 16px;
+            }
+        }
+    </style>
+    <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js" onerror="var s=document.createElement('script');s.src='/static/marked.min.js';document.head.appendChild(s);"></script>
+    <script>
+        function toggleContractingParty() {
+            var type = document.querySelector('input[name="review_type"]:checked').value;
+            document.getElementById('contracting_party_group').style.display = (type === '合同审查') ? 'block' : 'none';
+        }
+        window.onload = function() {
+            toggleContractingParty();
+        };
+
+        function showError(msg) {
+            document.getElementById('error_box').innerText = msg;
+        }
+        function clearError() {
+            document.getElementById('error_box').innerText = '';
+        }
+        function clearResult() {
+            document.getElementById('primary_result').innerText = '';
+            document.getElementById('review_result').innerText = '';
+        }
+        // 递归渲染JSON为HTML，所有字符串字段直接以中文直出
+        function renderJsonToHtml(obj, indent = 0) {
+            let html = '';
+            const pad = '&nbsp;'.repeat(indent * 2);
+            if (Array.isArray(obj)) {
+                html += '[<br>';
+                for (let i = 0; i < obj.length; i++) {
+                    html += pad + renderJsonToHtml(obj[i], indent + 1) + (i < obj.length - 1 ? ',' : '') + '<br>';
+                }
+                html += pad.slice(0, -2) + ']';
+            } else if (typeof obj === 'object' && obj !== null) {
+                html += '{<br>';
+                const keys = Object.keys(obj);
+                keys.forEach((key, idx) => {
+                    html += pad + '&nbsp;&nbsp;"' + key + '": ' + renderJsonToHtml(obj[key], indent + 1);
+                    if (idx < keys.length - 1) html += ',';
+                    html += '<br>';
+                });
+                html += pad + '}';
+            } else if (typeof obj === 'string') {
+                html += '"' + obj.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '"';
+            } else {
+                html += String(obj);
+            }
+            return html;
+        }
+        // 新增：HTML转纯文本工具
+        function htmlToText(html) {
+            var div = document.createElement('div');
+            div.innerHTML = html;
+            return div.innerText || div.textContent || '';
+        }
+        // 新增：渲染带截断的内容
+        function renderTruncatedContent(elementId, markdownContent, storageKey) {
+            if (typeof marked === 'undefined') {
+                // 降级为纯文本
+                const text = htmlToText(markdownContent);
+                let truncated = text;
+                if (text.length > 50) {
+                    truncated = text.slice(0, 50) + '……';
+                }
+                document.getElementById(elementId).innerText = truncated;
+                window[storageKey] = markdownContent;
+                return;
+            }
+            // 先将Markdown转为HTML，再转为纯文本判断长度
+            const html = marked.parse(markdownContent);
+            const text = htmlToText(html);
+            let truncatedHtml = html;
+            if (text.length > 50) {
+                // 截断纯文本后再用marked渲染
+                const shortText = text.slice(0, 50) + '……';
+                truncatedHtml = marked.parse(shortText);
+            }
+            document.getElementById(elementId).innerHTML = truncatedHtml;
+            window[storageKey] = markdownContent;
+        }
+        // 新增：弹窗显示完整内容
+        function showFullContent(markdownContent) {
+            let modal = document.getElementById('result_modal');
+            if (!modal) {
+                modal = document.createElement('div');
+                modal.id = 'result_modal';
+                modal.style.position = 'fixed';
+                modal.style.left = '0';
+                modal.style.top = '0';
+                modal.style.width = '100vw';
+                modal.style.height = '100vh';
+                modal.style.background = 'rgba(0,0,0,0.25)';
+                modal.style.display = 'flex';
+                modal.style.alignItems = 'center';
+                modal.style.justifyContent = 'center';
+                modal.style.zIndex = '9999';
+                modal.innerHTML = `
+                  <div id="modal_card" style="background:#fff;max-width:520px;width:90vw;max-height:80vh;overflow:auto;border-radius:14px;box-shadow:0 4px 24px 0 rgba(0,0,0,0.12);padding:32px 28px 24px 28px;position:relative;">
+                    <button id="modal_close" style="position:absolute;top:12px;right:12px;background:none;border:none;font-size:22px;cursor:pointer;">×</button>
+                    <div id="modal_content"></div>
+                  </div>
+                `;
+                document.body.appendChild(modal);
+            }
+            if (typeof marked === 'undefined') {
+                document.getElementById('modal_content').innerText = markdownContent;
+            } else {
+                document.getElementById('modal_content').innerHTML = marked.parse(markdownContent);
+            }
+            modal.style.display = 'flex';
+            document.getElementById('modal_close').onclick = function() {
+                modal.style.display = 'none';
+            };
+        }
+        // 绑定点击事件
+        function bindResultClick() {
+            document.getElementById('primary_result').onclick = function() {
+                if (window.primary_full_content) showFullContent(window.primary_full_content);
+            };
+            document.getElementById('review_result').onclick = function() {
+                if (window.review_full_content) showFullContent(window.review_full_content);
+            };
+        }
+        async function handleFormSubmit(e) {
+            e.preventDefault();
+            clearError();
+            clearResult();
+            // 优化：提交后初审显示“审核中……”，复审清空
+            document.getElementById('primary_result').innerText = '审核中……';
+            document.getElementById('review_result').innerText = '';
+            const form = e.target;
+            const formData = new FormData(form);
+
+            // 新增：用于流式内容追加
+            let primaryStreaming = true;
+            let reviewStreaming = false;
+            let primaryBuffer = '';
+            let reviewBuffer = '';
+
+            try {
+                // 1. 先POST /upload，获取inputs和user_id
+                const resp = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                if (!resp.ok) {
+                    showError('文件上传失败');
+                    return;
+                }
+                const data = await resp.json();
+                if (!data.inputs || !data.user_id) {
+                    showError('参数返回异常');
+                    return;
+                }
+                // 调试：直接输出filename
+                if (data.inputs.file && data.inputs.file.filename) {
+                    console.log('前端拿到的filename:', data.inputs.file.filename);
+                }
+                // 2. POST /stream_chat，流式获取AI输出
+                // 初审“审核中……”，复审清空（已在上方设置，无需重复）
+                const streamResp = await fetch('/stream_chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ inputs: data.inputs, user_id: data.user_id })
+                });
+                if (!streamResp.ok) {
+                    showError('AI审查流式接口调用失败');
+                    return;
+                }
+                const reader = streamResp.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let buffer = '';
+                let primaryDone = false;
+                let reviewDone = false;
+                // 新增：清空内容
+                document.getElementById('primary_result').innerText = '审核中……';
+                document.getElementById('review_result').innerText = '';
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+                    let lines = buffer.split(/\n\n/);
+                    buffer = lines.pop();
+                    for (let line of lines) {
+                        if (line.startsWith('data:')) {
+                            let content = line.slice(5).trim();
+                            if (content.startsWith('[ERROR]')) {
+                                showError(content);
+                            } else {
+                                try {
+                                    let obj = JSON.parse(content);
+                                    // 只处理event为node_finished的片段
+                                    if (obj.event === 'node_finished' && obj.data && obj.data.title && (obj.data.title === '直接回复 2' || obj.data.title === '直接回复2')) {
+                                        if (obj.data.outputs && obj.data.outputs.answer) {
+                                            // 只显示最终answer，清空前面内容
+                                            renderTruncatedContent('primary_result', obj.data.outputs.answer, 'primary_full_content');
+                                            document.getElementById('review_result').innerText = '审核中……';
+                                            bindResultClick();
+                                            primaryDone = true;
+                                            primaryStreaming = false;
+                                            reviewStreaming = true;
+                                            // 清空reviewBuffer
+                                            reviewBuffer = '';
+                                        }
+                                    } else if (obj.event === 'node_finished' && obj.data && obj.data.title && (obj.data.title === '直接回复 3' || obj.data.title === '直接回复3')) {
+                                        if (obj.data.outputs && obj.data.outputs.answer) {
+                                            // 只显示最终answer，清空前面内容
+                                            renderTruncatedContent('review_result', obj.data.outputs.answer, 'review_full_content');
+                                            bindResultClick();
+                                            reviewDone = true;
+                                            reviewStreaming = false;
+                                        }
+                                    } else {
+                                        // 新增：流式内容追加显示
+                                        if (primaryStreaming && !primaryDone) {
+                                            // 只在初审阶段追加
+                                            if (content) {
+                                                primaryBuffer += (htmlToText(content) + '\n');
+                                                document.getElementById('primary_result').innerText = primaryBuffer;
+                                                // 自动滚动到底部
+                                                let el = document.getElementById('primary_result');
+                                                el.scrollTop = el.scrollHeight;
+                                            }
+                                        } else if (reviewStreaming && !reviewDone) {
+                                            // 只在复审阶段追加
+                                            if (content) {
+                                                reviewBuffer += (htmlToText(content) + '\n');
+                                                document.getElementById('review_result').innerText = reviewBuffer;
+                                                // 自动滚动到底部
+                                                let el = document.getElementById('review_result');
+                                                el.scrollTop = el.scrollHeight;
+                                            }
+                                        }
+                                    }
+                                } catch (e) {
+                                    // 忽略解析失败的片段
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (err) {
+                showError('系统异常: ' + err);
+            }
+        }
+    </script>
+</head>
+<body>
+<div class="container">
+    <h2>文件/合同审查系统</h2>
+    <div id="error_box" class="error"></div>
+    <form id="review_form" method="post" action="/upload" enctype="multipart/form-data" onsubmit="handleFormSubmit(event)">
+        <div class="form-group">
+            <label>类型选择：</label>
+            <label><input type="radio" name="review_type" value="文件审查" checked onclick="toggleContractingParty()"> 文件审查</label>
+            <label><input type="radio" name="review_type" value="合同审查" onclick="toggleContractingParty()"> 合同审查</label>
+        </div>
+        <div class="form-group" id="contracting_party_group" style="display:none;">
+            <label>合同身份：</label>
+            <label><input type="radio" name="contracting_party" value="甲方"> 甲方</label>
+            <label><input type="radio" name="contracting_party" value="乙方"> 乙方</label>
+            <label><input type="radio" name="contracting_party" value="丙方"> 丙方</label>
+        </div>
+        <div class="form-group">
+            <label>上传文件：</label>
+            <input type="file" name="file" required>
+        </div>
+        <button type="submit">提交审核</button>
+    </form>
+    <div class="results-flex">
+        <div class="result-card">
+            <div class="result-title">初审结果：</div>
+            <div id="primary_result" class="result-content"></div>
+        </div>
+        <div class="result-card">
+            <div class="result-title">复审结果：</div>
+            <div id="review_result" class="result-content"></div>
+        </div>
+    </div>
+</div>
+</body>
+</html> 

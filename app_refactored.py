@@ -7,7 +7,6 @@ from flask import Flask
 from config import get_config
 from routes import main_bp
 from utils import get_logger
-from utils.logger import LoggerManager
 
 
 def create_app():
@@ -25,9 +24,6 @@ def create_app():
     config = get_config()
     app.config.from_object(config)
     
-    # 初始化日志系统
-    LoggerManager.setup_logging(config)
-    
     # 设置日志
     logger = get_logger(__name__)
     logger.info("正在初始化审查系统应用...")
@@ -42,7 +38,7 @@ def create_app():
     
     # 验证配置
     try:
-        config.validate_required_config()
+        config.validate()
         logger.info("配置验证通过")
     except Exception as e:
         logger.error(f"配置验证失败: {str(e)}")
