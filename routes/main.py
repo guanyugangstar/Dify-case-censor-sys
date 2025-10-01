@@ -3,8 +3,12 @@
 定义应用的所有路由和视图函数
 """
 import json
-from flask import Blueprint, render_template, request, jsonify, Response, current_app
+import io
+from datetime import datetime
+from flask import Blueprint, render_template, request, jsonify, Response, current_app, send_file
 from werkzeug.exceptions import RequestEntityTooLarge
+from docx import Document
+from docx.shared import Inches
 
 from config import get_config
 from services import FileService, DifyClient, ValidationService
@@ -41,6 +45,11 @@ def upload():
         review_type = request.form.get('review_type')
         contracting_party = request.form.get('contracting_party')
         category = request.form.get('category')
+        
+        # 添加详细的调试日志
+        logger.debug(f"请求参数 - file: {file}, review_type: {review_type}, contracting_party: {contracting_party}, category: {category}")
+        logger.debug(f"request.files: {list(request.files.keys())}")
+        logger.debug(f"request.form: {dict(request.form)}")
         
         # 验证请求参数
         ValidationService.validate_upload_request(review_type, contracting_party)
@@ -168,6 +177,78 @@ def stream_chat():
     except Exception as e:
         logger.error(f"流式聊天处理未知错误: {str(e)}")
         return jsonify({'error': '聊天服务暂时不可用，请稍后重试'}), 500
+
+
+@main_bp.route('/download_word', methods=['POST'])
+def download_word():
+    """下载Word文档"""
+    try:
+        logger.info("开始处理Word文档下载请求")
+        
+        # 获取请求数据
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': '请求数据为空'}), 400
+        
+        result_type = data.get('result_type')
+        result_data = data.get('result_data')
+        filename = data.get('filename', 'audit_result.docx')
+        
+        if not result_type or not result_data:
+            return jsonify({'error': '缺少必要参数'}), 400
+        
+        # 创建Word文档
+        doc = Document()
+        
+        # 添加标题
+        title = '初审结果' if result_type == 'primary' else '复审结果'
+        doc.add_heading(title, 0)
+        
+        # 添加生成时间
+        doc.add_paragraph(f'生成时间: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}')
+        doc.add_paragraph('')  # 空行
+        
+        # 添加审查结果内容
+        doc.add_heading('审查结果详情', level=1)
+        
+        # 如果result_data是字符串，直接添加
+        if isinstance(result_data, str):
+            doc.add_paragraph(result_data)
+        # 如果是字典，格式化显示
+        elif isinstance(result_data, dict):
+            for key, value in result_data.items():
+                p = doc.add_paragraph()
+                p.add_run(f'{key}: ').bold = True
+                p.add_run(str(value))
+        # 如果是列表，逐项显示
+        elif isinstance(result_data, list):
+            for item in result_data:
+                doc.add_paragraph(f'• {str(item)}')
+        else:
+            doc.add_paragraph(str(result_data))
+        
+        # 添加页脚信息
+        doc.add_paragraph('')
+        doc.add_paragraph('---')
+        doc.add_paragraph('本文档由文件合同审查系统自动生成')
+        
+        # 将文档保存到内存
+        doc_io = io.BytesIO()
+        doc.save(doc_io)
+        doc_io.seek(0)
+        
+        logger.info(f"Word文档生成成功: {filename}")
+        
+        return send_file(
+            doc_io,
+            as_attachment=True,
+            download_name=filename,
+            mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        )
+        
+    except Exception as e:
+        logger.error(f"Word文档生成失败: {str(e)}")
+        return jsonify({'error': 'Word文档生成失败'}), 500
 
 
 @main_bp.route('/health', methods=['GET'])
